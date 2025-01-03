@@ -1,0 +1,507 @@
+---
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+Consigne : Vous allez devoir le nettoyer, étudier la question des
+données manquantes, et identifier des problèmes associés au jeu de
+données. Vous devez produire un notebook Jupyter (en PDF) qui comporte
+de manière exhaustive toutes les opérations que vous réaliserez (dans
+l’ordre des consignes).
+
+On installe tous les packages nécessaires pour la réalisation du
+notebook
+
+```{r}
+#install.packages("ggplot2")
+#install.packages("dplyr")
+#install.packages("tidyr")
+#install.packages("tidyverse")
+#install.packages("lubridate")
+#install.packages("stringr")
+#install.packages("visdat")
+#install.packages("pheatmap")
+#install.packages("GGally")
+#install.packages("naniar")
+#install.packages("reshape")
+```
+
+On appelle à utiliser chaque package grâce à library()
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(visdat)
+library(pheatmap)
+library(GGally)
+library(lubridate)
+library(naniar)
+library(reshape)
+```
+
+6.1 Identifier des données manquantes
+
+On charge notre fichier csv "phd.dataset" contenant les soutenances de
+thèses en France dans notre notebook.
+
+```{r}
+phd <- read.csv("C:/Users/annas/Documents/R/Data/phD.dataset.csv", sep=",")
+```
+
+```{r}
+head(phd) #on visualise les premières lignes du fichier csv 
+summary(phd) #nous donne toutes les informations de chaque colonne à connaitre comme sa classe, sa moyenne, sa valeur min et max, etc 
+colnames(phd) #on regarde le nom de toutes les colonnes
+```
+
+Plus simplement pour avoir la classe de chaque colonne on utilise la
+fonction sapply à notre dataset et on y spécifie la fonction class
+
+```{r}
+sapply(phd, class) 
+```
+
+On remplace toutes les cellules vides sans informations par des NA.
+Cette étape est très importante car nous allons analyser par la suite le
+pourcentage des NA qui aurait pu alors être faussé si les cellules vides
+n'avaient été transformés car elles n'auraient pas été considérées comme
+des valeurs manquantes alors qu'elles ne fournissent aucune information.
+On fait en sorte de traiter toutes les cellules en tant que caractère
+pour pouvoir traiter correctement les cellules vides en valeurs
+manquantes. On s'est aperçu par ailleurs que des cellules "na" n'était
+pas traitées en tant que valeurs manquantes grâce à la fonction head()
+donc nous transformons aussi ces cellules dans notre code.
+
+```{r}
+phd_ordonne <- phd %>%
+  mutate(across(everything(), ~ as.character(.) %>% na_if("") %>% na_if("na"))) %>% 
+  select(-X) #on supprime également la colonne X de notre dataframe qui était juste une colonne d'index qui ne nous servait pas
+```
+
+```{r}
+head(phd_ordonne)
+summary(phd_ordonne)
+```
+
+On calcule ensuite le pourcentage de données manquantes pour chaque
+colonne de notre nouveau dataframe phd_ordonne
+
+```{r}
+na_pourcentage <- phd_ordonne %>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) #calcule la proportion de "TRUE" renvoyée par is.na() pour chaque colonne
+```
+
+On va arrondir les pourcentages de nos valeurs manquantes pour plus de
+lisibilité et d'interprétation, on va arrondir à un chiffre après la
+virgule. On a également transposer notre dataframe pour avoir une
+colonne avec tous nos pourcentages et une colonne avec nos variable
+
+```{r}
+na_pourcentage <- round(na_pourcentage, 1)
+colnames(na_pourcentage)
+```
+
+```{r}
+na_pourcentage <- na_pourcentage %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "pourcentage_na") #on renomme nos colonnes pour plus de lisibilité et de facilité par la suite
+```
+
+Les deux graphiques ci-dessous nous donnes à voir la concurrence de
+données manquantes dans notre jeu de données de thèses
+
+```{r}
+ggplot(na_pourcentage, aes(x = reorder(variable, -pourcentage_na), y = pourcentage_na)) +
+  geom_bar(stat = "identity", fill = "grey") +  
+  labs(title = "Répartition des données manquantes par variable",
+       y = "Pourcentage de données manquantes") +
+  theme(axis.text.x = element_text(angle = 80, hjust = 1),
+        axis.title.x = element_blank()) +  # Incliner les noms de variables pour meilleure lisibilité
+  scale_y_continuous(labels = scales::percent_format(scale = 1)) 
+
+```
+
+On prend un échantillon car notre jeu de données est trop lourd. On voit
+tout de même les occurences des valeurs manquantes pour chaque variables
+et on repère facilement quelles variables ont le plus d'occurences
+
+```{r}
+phd_sample <- phd_ordonne %>%
+  slice_sample(n = 1000)
+
+vis_dat(phd_sample)
+```
+
+Nous allons ensuite créer une heatmap contenant les pourcentages de
+valeurs manquantes de chaque colonne.
+
+```{r}
+na_pourcentage_matrix <- as.matrix(na_pourcentage[, "pourcentage_na", drop = FALSE])
+
+# Assurez-vous que les noms de lignes sont bien définis
+rownames(na_pourcentage_matrix) <- rownames(na_pourcentage$variable)
+  
+pheatmap(na_pourcentage_matrix,
+  display_numbers = TRUE,
+  fontsize = 8,
+  cluster_cols = FALSE,
+  cluster_rows = FALSE,
+  main = "Pourcentage de données manquantes par variable"
+  )
+```
+
+```{r}
+colnames(na_pourcentage)
+str(na_pourcentage)
+```
+
+On a crée une matrice avec toutes nos valeurs manquantes
+
+```{r}
+missing_matrix <- is.na(phd_ordonne) #genere une matrice avec les valeurs TRUE ou FALSE indiquant si la valeur correspondante est manquante ou non
+missing_corr <- cor(missing_matrix, use = "pairwise.complete.obs") #calcule la matrice de corrélation entre les colonnes de missing_matrix
+```
+
+```{r}
+print(missing_corr)
+head(missing_matrix)
+head(missing_corr)
+```
+
+On va dans notre matrice de correlation masquer la partie supérieure de
+la matrice pour ne conserver que la partie inférieure. Cette étape vient
+simplifier la visualisation et l'analyse de nos corrélations
+
+```{r}
+missing_corr_mask <- as.data.frame(as.table(missing_corr)) #as.table transforme la matrice en un tableau de frequence, chaque élément de la matrice devient une entrée dans le tableau avec les colonnes représentant les noms des variables. On convertit le tableau en data frame pour le manipuler plus facilement par la suite.
+missing_corr_mask <- missing_corr_mask[as.character(missing_corr_mask$Var2) <= as.character(missing_corr_mask$Var1), ] #masquer le triangle supérieur en filtrant pour ne garder que les paires de variables où Var1 <= Var2
+```
+
+On va filtrer davantage missing_corr_mask pour ne garder que les paires
+où Var1 est strictement inférieur à Var2, on exclue les paires où Var1
+est égal à Var2, soit les cas où une variable est comparée à elle-même.
+
+```{r}
+missing_corr_upper <- missing_corr_mask %>%
+  filter(as.numeric(Var1) > as.numeric(Var2))
+```
+
+On visualise les patterns dans les données manquantes
+
+```{r}
+ggplot(missing_corr_upper, aes(Var1, Var2, fill = Freq)) +
+  geom_tile(color = "white",bwidth = 0.8, height = 1) +
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0, name=NULL,limits = c(-1, 1), breaks = seq(-1, 1, by = 0.2),
+                       guide = guide_colorbar(barwidth = 1.5,  # Largeur de la barre de la légende
+                                              barheight = 9 # Hauteur de la barre de la légende
+                                              )) +
+  geom_text(aes(label = ifelse(is.na(Freq), "", round(Freq, 2))), color = "black", size = 2) +
+  theme(panel.background = element_blank(),  # Supprime le fond du panneau
+        plot.background = element_blank(),
+        axis.text.x = element_text(angle = 90, hjust = 1, margin = margin(t = 10)),
+        axis.title.y = element_text(margin = margin(r = 10)),
+        axis.title.x = element_blank(),
+        axis.title.y.left = element_blank())
+```
+
+```{r}
+coord_fixed()
+```
+
+D'abord calculer le pourcentage de valeurs manquantes par statut pour
+chaque variable. On crée donc une nouvelle table ou l'on va grouper
+toutes nos variables par la variable statut pour ensuite recalculer le
+pourcentage de valeurs manquantes. On va ensuite avec pivot longueur
+transformer en une colonne toutes nos variables qui representait une
+colonne à elle seule.
+
+```{r}
+na_pourcentage_statut <- phd_ordonne %>%
+  group_by(Statut)%>%
+  summarise(across(everything(), ~ mean(is.na(.)) * 100)) %>%
+  pivot_longer(-Statut, names_to = "variable", values_to = "pourcentage_na") %>% #cela signifie que toutes les colonnes sauf Statut (-Statut) exclu de la transformation, seront regroupées dans une seule colonne appelée variable, tandis que les valeurs de ces colonnes seront placées dans une autre colonne appelée pourcentage_na. 
+  pivot_wider(names_from = Statut, values_from = pourcentage_na) #les valeurs enCours et soutenue de la colonne Statut deviendront les noms des nouvelles colonnes où on placera les valeurs de la colonne pourcentage_na
+
+
+na_pourcentage_statut<- na_pourcentage_statut %>%
+  mutate(enCours = round(enCours, 1), soutenue = round(soutenue, 1)) #enfin on arrondi les colonnes à un chiffre après la virgule pour plus de lisibilité et d'interpretation des résultats
+```
+
+Nous transformons notre jeu de données des pourcentages des valeurs
+manquantes par statut en matrix pour pouvoir utiliser nos résultats pour
+construire notre heatmap
+
+```{r}
+na_pourcentage_statut_matrix <- as.matrix(na_pourcentage_statut[, -1])  # on exclue la première colonne ("variable")
+
+pheatmap(na_pourcentage_statut_matrix,
+       display_numbers = TRUE,
+       fontsize = 8,
+       cluster_cols = FALSE,
+       cluster_rows = FALSE,
+       main = "Pourcentage de données manquantes par statut",
+       labels_row = na_pourcentage_statut$variable, # Utilise les noms de variables pour les lignes
+       labels_col = c("En Cours", "Soutenue"))  # Donne des noms aux colonnes du statut
+
+```
+
+Visualisation des données manquantes avec ggmissupsed
+
+```{r}
+gg_miss_upset(phd_sample)
+gg_miss_upset(phd_ordonne)
+```
+
+6.2) Détection d’un problème dans les données
+
+On convertit la colonne en "date" et on extrait le mois dans la colonne
+date de soutenance et on reinjecte la nouvelle variable dans le phd.
+Pour cela on identifie sous quelle forme de date notre colonne a été
+définie et en appellant la library lubridate on va pouvoir la traiter en
+tant que date. On utilise mutate pour creer à partir de cela une
+nouvelle colonne month_soutenance qui comporte uniquement le mois de
+chaque soutenance de thèse.
+
+```{r}
+phd_ordonne <- phd_ordonne %>%
+  mutate(Date.de.soutenance = ymd(Date.de.soutenance), 
+         month_soutenance = month(Date.de.soutenance)) 
+```
+
+```{r}
+phd_1984_2018 <- phd_ordonne %>%
+  filter(year(Date.de.soutenance) >= 1984 & year(Date.de.soutenance) <= 2018) #on filtrer également sur la période 1984-2018
+```
+
+On crée un nouveau dataset phd_by_month où l'on repertorie le nombre de
+soutenance effectué par mois avec la fonction count() et group
+by()represente dans phd_by_month la distribution du mois de soutenance
+pour notre phd sur la période 1984-2018
+
+```{r}
+phd_by_month_84_18 <- phd_1984_2018 %>%
+  group_by(month_soutenance) %>%
+  count(name = "distribution") 
+
+phd_by_month_84_18 <- phd_by_month_84_18[-13, ] #on enlève la ligne 13 qui ne correspond pas à un mois mais à la somme de toutes les valeurs de notre colonne n par mois car on a utilisé la fonction count()
+```
+
+Nous créeons un bar plot pour représenter la distribution du mois de
+soutenance pour l’intégralité du jeu de données, sur la période
+1984-2018
+
+```{r}
+ggplot(phd_by_month_84_18, aes(x = month_soutenance, y = distribution)) +
+  geom_bar(stat = "identity", position = position_stack(0.6), alpha = 0.8, fill="black") +
+  scale_x_continuous(limits = c(0, 13), breaks = seq(1, 12, 1), 
+                     labels = month.abb) +  #abréviations des mois
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  theme(panel.background = element_blank()) + 
+  labs(x = "Mois de soutenance", y = "Distribution par mois")
+```
+
+
+On filtre notre phd initial pour que la colonne des années soit compris
+entre 2005 et 2018 et on va faire un group.by du mois de soutenance avec
+la colonne Year modifié pour avoir la distribution du mois de soutenance
+pour chaque année
+
+```{r}
+phd_2005_2018 <- phd_ordonne %>%
+  filter(Year >= 2005 & Year <= 2018)
+
+phd_by_month_05_18 <- phd_2005_2018 %>%
+  group_by(Year, month_soutenance) %>%
+  count(name="distribution")
+```
+
+Je reprends ma variable qui calcule le nombre d'occurences par mois pour
+chaque année et je le regroupe par année pour avoir les occurences pour
+chaque année donnée
+
+```{r}
+# Calcul du total et de la proportion pour chaque année
+phd_by_year_05_18 <- phd_by_month_05_18 %>%
+  group_by(Year) %>%
+  summarise(total = sum(distribution), .groups = "drop") %>%
+  left_join(phd_by_month_05_18, by = "Year") %>%
+  mutate(proportion = distribution / total) #on ajoute deux nouvelles colonnes : total(la somme des occurrences par année) et proportion 
+
+```
+
+On créé 14 graphiques grâce à facet wrap qui crée un graphique par année
+On peut observer suite à ce graphique que la proportion de thèses produites en janvier a diminué au fil des ans.
+```{r}
+ggplot(phd_by_year_05_18, aes(x = month_soutenance, y = proportion, fill = factor(month_soutenance))) +
+  geom_bar(stat = "identity", position = position_dodge(0.8), alpha = 0.8) +
+  scale_x_continuous(limits = c(0, 13), breaks = seq(1, 12, 1), labels = month.abb) +  # Utiliser les abréviations des mois
+  theme(axis.text.x = element_text(angle = 50, hjust = 1, size = 5)) +  # Rotation des labels des mois
+  theme(panel.background = element_blank()) + 
+  labs(y = "Proportion des soutenances", fill = "Mois de soutenance") +
+  facet_wrap(~ Year, scales = "free_y") +  # Facet par année
+  scale_fill_viridis_d()  # Option pour la palette de couleurs
+```
+
+On calcule d'abord l'erreur type en fonction de la proportion des
+soutenances et du nombre total de soutenances déjà calculé dans
+phd_by_month_proportion
+
+```{r}
+phd_by_month_05_18 <- phd_by_month_05_18 %>%
+  group_by(Year) %>%
+  mutate(total_soutenances = sum(distribution), 
+         proportion = distribution / total_soutenances, 
+         erreur_type = sqrt((proportion * (1 - proportion)) / total_soutenances))
+```
+
+On crée un bar plot où l'on regroupe phd_month_proportion par mois pour
+obtenir un seul graphique et on calcule la moyenne de notre proportion
+déjà calculé par rapport aux mois (respectivement notre erreur type)
+
+```{r}
+phd_year_compil <- phd_by_month_05_18 %>%
+  group_by(month_soutenance) %>%
+  summarise(mean_proportion = mean(proportion, na.rm = TRUE),
+            mean_erreurtype = sd(proportion, na.rm = TRUE) / sqrt(n()))
+
+ggplot(phd_year_compil, aes(x = month_soutenance, y = mean_proportion)) +
+  geom_bar(stat = "identity", fill = "red", position = position_dodge()) +
+  
+#on crée notre errorbar avec notre erreurtype calculé
+  geom_errorbar(aes(ymin = mean_proportion - mean_erreurtype, ymax = mean_proportion + mean_erreurtype), width = 0.2) +
+  scale_x_continuous(limits = c(0,13), breaks = seq(1, 12, 1), labels = month.abb) +  
+  labs(x = "Mois de soutenance", y = "Proportion des soutenances") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+On refait le même graphique mais en enlevant dans phd proportion toutes
+les thèses où la date de soutenance est le premier janvier
+
+
+```{r}
+# Filtrer pour les soutenances du 1er janvier et calculer leur proportion par année
+premjanvier <- phd_ordonne %>%
+  filter(year(Date.de.soutenance) >= 1984, year(Date.de.soutenance) <= 2018) %>%
+  filter((month(Date.de.soutenance) == 1 & day(Date.de.soutenance) == 1)) 
+  
+premjanvier_count <- premjanvier %>%
+  group_by(annee = year(Date.de.soutenance)) %>%  # Grouper par année
+  summarise(nombre_soutenances = n())  # Compter le nombre de soutenances
+
+#On prend la proportion de thèse soutenues le 1er janvier par rapport aux thèses soutenues chaque années
+theses_par_annee <- phd_ordonne %>%
+  filter(year(Date.de.soutenance) >= 1988) %>%
+  filter(year(Date.de.soutenance) <=2018) %>%
+  mutate(annee = year(Date.de.soutenance)) %>% 
+  group_by(annee) %>%                           
+  summarise(nombre_total = n())
+  
+premjanvier_count_complet <- theses_par_annee %>%
+  left_join(theses_par_annee, by = "annee")
+
+ggplot(premjanvier_count, aes(x = annee, y = nombre_soutenances), size = 1) +
+  geom_line(stat = "identity") +
+  theme_minimal() +
+  labs(title = "Nombre de soutenances faites le 1er janvier par année (1988-2008)", x = "Années", y = "Nombre de soutenances") +
+  scale_x_continuous(limits = c(1988, 2018), breaks = seq(1910, 2020, 10)) +
+  scale_y_continuous(breaks = seq(0, 15000, 5000))
+
+```
+
+
+Nous allons = nous intéresser à la question des homonymes chez les noms
+d’auteurs avec le cas de Cécile Martin. On commence par rechercher les
+publications et contributions associées au nom "Cécile Martin" avec
+filter
+
+```{r}
+cecile_martin_data <- phd %>%
+  filter(Auteur == "Cecile Martin")
+```
+
+Note les différences entre les travaux des différentes Cécile Martin.
+Par exemple, sont-elles dans des domaines complètement différents ou
+partagent-elles des sujets de recherche similaires ?
+
+Les travaux des différentes Cécile Martin sont dans des domaines
+complétement différents comme Neuroscience, Sciences Economiques ou
+cinéma. Ces observations nous questionnent car trois des Cécile Martin
+ont pourtant le même identiifiant auteur ce qui signifie qu'elles sont
+considéres comme une et une seule personne. Les gens qui rentre le nom
+de la thèse peuvent se tromper et attribuer à un même identifiant les
+travaux d'une autre personne, le fait qu'il y ait plusieurs Cécile
+Martin peut entraîner des confusions dans la citation de travaux. Elles
+ont fait chacune des études différentes dans des villes différentes et
+dans des domaines différents
+
+Quelles sont les publications les plus citées pour chaque auteur ? Cela
+peut donner des indices sur leur impact dans le domaine.
+
+6.3 Détection d’outliers
+
+On va créer un nouveau jeu de données en se focalisant cette fois sur la
+question des directeurs sur la période 1984-2018.
+
+```{r}
+phd_ordonne <- phd_ordonne %>%
+  filter(year(Date.de.soutenance) >= 1984 & year(Date.de.soutenance) <= 2018) #on filtre sur la période demandée
+```
+
+Il vous faut une ligne par directeur/directrice, en conservant son nom
+et prénom, et créer une nouvelle variable sur le nombre de thèses
+encadrées
+
+```{r}
+phd_theses_directeur <- phd %>%
+  group_by(Directeur.de.these..nom.prenom.) %>%
+  summarise(nombre_theses = n(), .groups = 'drop') #cree une nouvelle colonne avec le nombre de thèses par directeur de thèses
+```
+
+On identifie les personnes ayant encadré un nombre relativement anormal
+de thèses en utilisant la fonction slice_max. On choisit d'afficher les
+cinq premiers directeurs ayant réalisé le plus de thèses. Il ne s'agit
+pas d'erreur dans les données simplement une personne est consideré
+comme directeur de thèses quand il est co-directeur et il ne fait
+parfois rien de spécifique dans le travail de la thèse mais est juste
+assigné co-directeur de thèse avec un de ses élèves alors qu'il n'a pas
+réellement partcipé ou avec une collégue de sexe féminin. Cela crée donc
+des chiffres complétement demesuré allant jusqu'à plusieurs centaines
+
+```{r}
+top_theses_directeurs <- phd_theses_directeur %>%
+  slice_max(order_by = nombre_theses, n = 5) 
+```
+
+6.4) Obtention de résultats préliminaires
+
+On a déjà transforme date de soutenance en colonne date. On utilise la
+fonction group_by() pour avoir tous les résultats en fonction de la
+colonne langue_rec et on compte le nombre de thèses par langue et on
+assigne à notre nouvelle variable language.rec
+
+```{r}
+phd_ordonne <- phd_ordonne %>%
+  mutate(annee = year(Date.de.soutenance))
+
+language.rec <- phd_ordonne %>%
+  group_by(Langue_rec, annee) %>%
+  count(name= "Nombre de thèses")
+```
+
+On crée avec ggplot un graphique qui montre en fonction des années le
+choix des langues pour les thèses avec l'année pour l'abscisse x
+
+```{r}
+ggplot(language.rec, aes(x = annee, y= n, fill = Langue_rec)) +
+  geom_area(stat="identity", position = "fill") + 
+  labs(x = "Année de soutenance", y = "Proportion") +
+  theme_minimal() +
+  scale_x_continuous(breaks = seq(2003, 2018, 2)) + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  guides(fill = guide_legend(title = "Langue choisie pour la thèse"))
+```
+
+
